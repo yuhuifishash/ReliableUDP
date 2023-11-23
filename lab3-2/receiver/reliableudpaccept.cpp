@@ -17,6 +17,8 @@ extern Reassembler recv_reassembler;
 extern pthread_mutex_t mutex;
 
 int64_t now_ackno = 0;
+int recv_tag = 0;
+int ESTABLISHED_end_tag = 0;
 
 void* timeevent_thread(void*)
 {
@@ -41,6 +43,43 @@ void tickevent()
         }
     }
     pthread_mutex_unlock(&mutex);
+}
+
+void* ESTABLISHED_recv_thread(void* p)
+{
+    int UDPReceiver = (int)(int64_t)p;
+    while(true){
+        char recv_buf[1500]={};
+        sockaddr_in tmp_addrSender;
+
+        socklen_t tmp_addrSenderlen = sizeof(tmp_addrSender);
+
+        ReliableUDPSegment Seg;
+
+        recvfrom(UDPReceiver,recv_buf,sizeof(recv_buf),0,(sockaddr*)&tmp_addrSender,&tmp_addrSenderlen);
+
+        pthread_mutex_lock(&mutex);
+        Seg = *(ReliableUDPSegment*)recv_buf;
+        if(!CheckSegSum(Seg)){std::cout<<"CheckSum error,drop this data\n";pthread_mutex_unlock(&mutex);continue;}
+        if(NAME(Seg)){std::cout<<"Receive disordered data, drop it.\n";pthread_mutex_unlock(&mutex);continue;}
+
+        recv_tag = 1;
+        std::cout<<"Receive {"<<GetSegInfo(Seg)<<"}\n";
+
+        int is_valid = recv_reassembler.recv_string(Seg.data,Seg.seqno,Seg.Len);
+        if(!is_valid && !FIN(Seg)){
+            std::cout<<"Receive disordered data, drop it.\n";
+        }
+
+        if(FIN(Seg)){
+            ESTABLISHED_end_tag = 1;
+            pthread_mutex_unlock(&mutex);
+            recv_reassembler.written_to_file();
+            break;
+        }
+        pthread_mutex_unlock(&mutex);
+    }
+    return NULL;
 }
 
 void ReliableUDPAccept(int UDPReceiver)
@@ -149,29 +188,16 @@ void Receive_SYN_RCVD(int UDPReceiver)
 }
 void Receive_ESTABLISHED(int UDPReceiver)
 {
+
+    pthread_t recv_established_t;
+    pthread_create(&recv_established_t,NULL,ESTABLISHED_recv_thread,(void*)(int64_t)UDPReceiver);
+
+
     while(true){
-        char recv_buf[1500]={};
-        sockaddr_in tmp_addrSender;
-
-        socklen_t tmp_addrSenderlen = sizeof(tmp_addrSender);
-
         ReliableUDPSegment Seg;
 
-        recvfrom(UDPReceiver,recv_buf,sizeof(recv_buf),0,(sockaddr*)&tmp_addrSender,&tmp_addrSenderlen);
-
-
-        Seg = *(ReliableUDPSegment*)recv_buf;
-        if(!CheckSegSum(Seg)){std::cout<<"CheckSum error,drop this data\n";return;}
-
-        std::cout<<"Receive {"<<GetSegInfo(Seg)<<"}\n";
-
-        int is_valid = recv_reassembler.recv_string(Seg.data,Seg.seqno,Seg.Len);
-        if(!is_valid && !FIN(Seg)){
-            std::cout<<"Receive disordered data, drop it.\n";
-        }
-
-
-        if(FIN(Seg)){
+        pthread_mutex_lock(&mutex);
+        if(ESTABLISHED_end_tag){
             Seg = CreateEmptySeg(0b01100000,0); //FIN ACK
             Seg.DestPort = addrSender.sin_port;
             Seg.SrcPort = htons(9961);
@@ -179,28 +205,28 @@ void Receive_ESTABLISHED(int UDPReceiver)
 
             sendto(UDPSender,(char*)&Seg,sizeof(Seg),0,(sockaddr*)&addrSender,sizeof(addrSender));
 
-            pthread_mutex_lock(&mutex);
             int64_t id = Seg.seqno;
             WaitingSegmentid[id] = Seg;
             WaitingAckSegment[Seg] = std::pair<int,int>{RetransTime,RetransTime};//first 100ms
-            pthread_mutex_unlock(&mutex);
 
             std::cout<<"Send {"<<GetSegInfo(Seg)<<"}\n";
 
-            recv_reassembler.written_to_file();
             status_now = CLOSE_WAIT;
+            pthread_mutex_unlock(&mutex);
             break;
         }
+        if(recv_tag){
+            recv_tag = 0;
+            Seg = CreateEmptySeg(0b00100000,now_ackno); //ACK
+            Seg.DestPort = addrSender.sin_port;
+            Seg.SrcPort = htons(9961);
+            CalculatedCheckSum(Seg);
 
-
-        Seg = CreateEmptySeg(0b00100000,now_ackno); //ACK
-        Seg.DestPort = addrSender.sin_port;
-        Seg.SrcPort = htons(9961);
-        CalculatedCheckSum(Seg);
-
-        sendto(UDPSender,(char*)&Seg,sizeof(Seg),0,(sockaddr*)&addrSender,sizeof(addrSender));
-        std::cout<<"Send {"<<GetSegInfo(Seg)<<"}(ackno = seqno)\n";
-
+            sendto(UDPSender,(char*)&Seg,sizeof(Seg),0,(sockaddr*)&addrSender,sizeof(addrSender));
+            std::cout<<"Send {"<<GetSegInfo(Seg)<<"}(ackno = seqno)\n";
+        }
+        pthread_mutex_unlock(&mutex);
+        usleep(10000);
     }
 }
 

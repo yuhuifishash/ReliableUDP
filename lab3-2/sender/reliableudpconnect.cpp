@@ -15,7 +15,7 @@
 #include <ctime>
 #include <chrono>
 
-int RetransTime = 500;
+int RetransTime = 300;
 
 std::map<int64_t,ReliableUDPSegment> WaitingSegmentid;
 std::map<ReliableUDPSegment,std::pair<int,int> > WaitingAckSegment;
@@ -28,9 +28,9 @@ extern ReliableSenderUDPStatus status_now;
 extern ByteStream buf;
 extern pthread_mutex_t mutex;
 
-uint16_t Sender_windowsize = 1024*16;
+uint16_t Sender_windowsize = 1024*32;
 
-int64_t now_ackno = 0;  //已被确认数据号
+int64_t now_ackno = -1024;  //已被确认数据号
 int64_t now_seqno = 0;  //发送数据号
 int64_t end_seqno = -1; //最后一个数据包标号
 
@@ -289,9 +289,8 @@ void Send_ESTABLISHED(int Acker,sockaddr_in addrSender)
             continue;
         }
         else{//根据窗口大小发送下一组数据包
-
-            std::cout<<"Sender_usable_Windowsize is "<<Sender_windowsize - (now_seqno - now_ackno)<<"\n";
-            int64_t Send_endseqno = now_seqno + Sender_windowsize - (now_seqno - now_ackno);
+            std::cout<<"Sender_usable_Windowsize is "<<Sender_windowsize - (now_seqno - now_ackno)+1024<<"\n";
+            int64_t Send_endseqno = now_seqno + Sender_windowsize - (now_seqno - now_ackno)+1024;
 
             pthread_mutex_lock(&mutex);
             while(now_seqno < Send_endseqno && !buf.end_tag){
