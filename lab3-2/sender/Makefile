@@ -1,0 +1,2 @@
+bin/sender:main.cpp bytestream.cpp reliableudpconnect.cpp reliableudpsegment.cpp router/sendrouter.cpp
+	g++ main.cpp bytestream.cpp reliableudpconnect.cpp reliableudpsegment.cpp router/sendrouter.cpp -o bin/sender -O2 -lpthread
