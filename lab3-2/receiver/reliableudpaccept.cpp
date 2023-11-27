@@ -19,6 +19,7 @@ extern pthread_mutex_t mutex;
 int64_t now_ackno = 0;
 int recv_tag = 0;
 int ESTABLISHED_end_tag = 0;
+pthread_t recv_established_t;
 
 void* timeevent_thread(void*)
 {
@@ -188,8 +189,6 @@ void Receive_SYN_RCVD(int UDPReceiver)
 }
 void Receive_ESTABLISHED(int UDPReceiver)
 {
-
-    pthread_t recv_established_t;
     pthread_create(&recv_established_t,NULL,ESTABLISHED_recv_thread,(void*)(int64_t)UDPReceiver);
 
 
@@ -260,5 +259,6 @@ void Receive_CLOSE_WAIT(int UDPReceiver)
 void Receive_CLOSED(int UDPReceiver)
 {
     std::cout<<"receive successfully,receiver will close.\n";
+    pthread_join(recv_established_t,NULL);
     return;
 }

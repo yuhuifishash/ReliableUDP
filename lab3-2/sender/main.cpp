@@ -52,7 +52,7 @@ int main(int argc, char *argv[])
 
     double filesize = buf.get_size()/1024.0;
     std::cout<<"The file size is "<<filesize<<"KB\n";
-
+    
     //build the router Sendthread
     pthread_t send_t;
     pthread_create(&send_t,NULL,SendThread,NULL);

@@ -18,7 +18,6 @@ pthread_mutex_t mutex;
 
 int main(int argc, char *argv[])
 {
-
     pthread_mutex_init(&mutex,NULL);
 
     int UDPReceiver = socket(AF_INET,SOCK_DGRAM, IPPROTO_UDP);
@@ -35,5 +34,7 @@ int main(int argc, char *argv[])
     ReliableUDPAccept(UDPReceiver);
 
     std::cout<<"connect close\n";
+
+    //pthread_join()
     return 0;
 }

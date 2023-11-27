@@ -21,6 +21,8 @@ std::map<int64_t,ReliableUDPSegment> WaitingSegmentid;
 std::map<ReliableUDPSegment,std::pair<int,int> > WaitingAckSegment;
 std::map<int64_t,timeval> delayMap;//用于计算延时
 
+int ESTABLISHED_end_tag = 0;
+int recv_flag = 0;
 std::map<int64_t,int> AckCounter;
 extern int UDPSender;
 extern sockaddr_in addrReceiver;
@@ -28,7 +30,8 @@ extern ReliableSenderUDPStatus status_now;
 extern ByteStream buf;
 extern pthread_mutex_t mutex;
 
-uint16_t Sender_windowsize = 1024*32;
+uint16_t Sender_windowsize = 1024*15;
+pthread_t send_established_t;
 
 int64_t now_ackno = -1024;  //已被确认数据号
 int64_t now_seqno = 0;  //发送数据号
@@ -79,6 +82,49 @@ void tickevent()
     }
     pthread_mutex_unlock(&mutex);
 }
+
+void* ESTABLISHED_send_thread(void* p)
+{
+    sockaddr_in addrSender = *((sockaddr_in*)p);
+    
+    while(true){
+        if(recv_flag){
+            pthread_mutex_lock(&mutex);
+            recv_flag = 0;
+            
+            std::cout<<"Sender_usable_Windowsize is "<<Sender_windowsize - (now_seqno - now_ackno) + 1024<<"\n";
+            int64_t Send_endseqno = now_seqno + Sender_windowsize - (now_seqno - now_ackno) + 1024;
+
+            while(now_seqno < Send_endseqno && !buf.end_tag){
+                ReliableUDPSegment Seg = CreateDataSeg(0b00000000,now_seqno,buf.pop_some_byte(std::min((int64_t)1024,Send_endseqno - now_seqno)));//Data
+                Seg.SrcPort = addrSender.sin_port;
+                Seg.DestPort = addrReceiver.sin_port;
+                CalculatedCheckSum(Seg);
+
+                if(buf.end_tag){end_seqno = now_seqno;}
+                else{now_seqno += Seg.Len;}
+
+                SendToRouter(UDPSender,Seg,sizeof(Seg),0,(sockaddr*)&addrReceiver,sizeof(addrReceiver));
+                std::cout<<"Send {"<<GetSegInfo(Seg)<<"}\n";
+
+                int64_t id = Seg.seqno;
+                
+                WaitingSegmentid[id] = Seg;
+                WaitingAckSegment[Seg] = std::pair<int,int>{RetransTime,RetransTime};
+                
+                timeval tv_start;
+                gettimeofday(&tv_start,NULL);
+                delayMap[id] = tv_start;
+                ++cnt;
+            }
+            pthread_mutex_unlock(&mutex);
+        }
+        if(buf.end_tag){
+            break;
+        }
+    }
+    return NULL;
+}
 /*
  * Acker 接收接收端发送的ACK等信息
  * addrSender  发送端的端口号和ip地址等信息
@@ -113,7 +159,7 @@ void ReliableUDPConnect(int Acker,sockaddr_in addrSender)
 void Send_CLOSED(int Acker,sockaddr_in addrSender)
 {
     ReliableUDPSegment Seg = CreateEmptySeg(0b10000000,0);//SYN
-    Seg.SrcPort = addrSender.sin_port;;
+    Seg.SrcPort = addrSender.sin_port;
     Seg.DestPort = addrReceiver.sin_port;
     CalculatedCheckSum(Seg);
 
@@ -184,7 +230,6 @@ void Send_ESTABLISHED(int Acker,sockaddr_in addrSender)
         ReliableUDPSegment Seg = *(ReliableUDPSegment*)recv_buf;
         if(!CheckSegSum(Seg)){std::cout<<"CheckSum error,drop this data\n";return;}
 
-
         int64_t id = Seg.seqno;
         std::cout<<"Receive {"<<GetSegInfo(Seg)<<"}\n";
 
@@ -229,13 +274,19 @@ void Send_ESTABLISHED(int Acker,sockaddr_in addrSender)
         break;
     }
 
+
+
+    pthread_create(&send_established_t,NULL,ESTABLISHED_send_thread,(void*)(&addrSender));
+    
     while(true){
         recvfrom(Acker,recv_buf,sizeof(recv_buf),0,(sockaddr*)&addrAckSender,&addrAckSenderlen);
         ReliableUDPSegment Seg = *(ReliableUDPSegment*)recv_buf;
         if(!CheckSegSum(Seg)){std::cout<<"CheckSum error,drop this data\n";return;}
 
         int64_t ackno = Seg.seqno;
+        pthread_mutex_lock(&mutex);
         std::cout<<"Receive {"<<GetSegInfo(Seg)<<"}(ackno = seqno)\n";
+        pthread_mutex_unlock(&mutex);
 
         timeval tv_end;
         gettimeofday(&tv_end,NULL);
@@ -249,8 +300,11 @@ void Send_ESTABLISHED(int Acker,sockaddr_in addrSender)
         }
 
         if(ackno > now_ackno){updateWaitingSegment(ackno);}//更新超时重传任务
-        now_ackno = ackno;
 
+        pthread_mutex_lock(&mutex);
+        now_ackno = ackno;
+        recv_flag = 1;
+        pthread_mutex_unlock(&mutex);
 
         AckCounter[ackno]++;
         if(AckCounter[ackno] >= 3){//快速重传对应数据包
@@ -279,46 +333,12 @@ void Send_ESTABLISHED(int Acker,sockaddr_in addrSender)
             
             WaitingSegmentid[id] = Seg;
             WaitingAckSegment[Seg] = std::pair<int,int>{RetransTime,RetransTime};//first 100ms
+            
+            std::cout<<"Send {"<<GetSegInfo(Seg)<<"}\n";
             pthread_mutex_unlock(&mutex);
 
-            std::cout<<"Send {"<<GetSegInfo(Seg)<<"}\n";
             status_now = FIN_WAIT;
             break;
-        }
-        else if(buf.end_tag){//需要传输的数据均已发送完毕，等待对方确认所有数据
-            continue;
-        }
-        else{//根据窗口大小发送下一组数据包
-            std::cout<<"Sender_usable_Windowsize is "<<Sender_windowsize - (now_seqno - now_ackno)+1024<<"\n";
-            int64_t Send_endseqno = now_seqno + Sender_windowsize - (now_seqno - now_ackno)+1024;
-
-            pthread_mutex_lock(&mutex);
-            while(now_seqno < Send_endseqno && !buf.end_tag){
-                Seg = CreateDataSeg(0b00000000,now_seqno,buf.pop_some_byte(std::min((int64_t)1024,Send_endseqno - now_seqno)));//Data
-                Seg.SrcPort = addrSender.sin_port;
-                Seg.DestPort = addrReceiver.sin_port;
-                CalculatedCheckSum(Seg);
-
-                if(buf.end_tag){end_seqno = now_seqno;}
-                else{now_seqno += Seg.Len;}
-
-                
-
-                SendToRouter(UDPSender,Seg,sizeof(Seg),0,(sockaddr*)&addrReceiver,sizeof(addrReceiver));
-                std::cout<<"Send {"<<GetSegInfo(Seg)<<"}\n";
-
-                int64_t id = Seg.seqno;
-                
-                WaitingSegmentid[id] = Seg;
-                WaitingAckSegment[Seg] = std::pair<int,int>{RetransTime,RetransTime};//first 100ms
-                
-
-                timeval tv_start;
-                gettimeofday(&tv_start,NULL);
-                delayMap[id] = tv_start;
-                ++cnt;
-            }
-            pthread_mutex_unlock(&mutex);
         }
     }
 }
