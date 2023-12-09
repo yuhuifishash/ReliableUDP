@@ -16,7 +16,7 @@ extern ReliableReceiverUDPStatus status_now;
 extern Reassembler recv_reassembler;
 extern pthread_mutex_t mutex;
 
-uint16_t Receiver_windowsize = 8*1024;
+uint16_t Receiver_windowsize = 12*1024;
 int64_t now_ackno = 0;
 int64_t max_recv_seqno = 0;
 

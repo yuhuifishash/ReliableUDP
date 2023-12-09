@@ -44,9 +44,9 @@ int main(int argc, char *argv[])
     bind(UDPAcker,(sockaddr*)&addrAcker,sizeof(addrAcker));
 
     std::fstream f;
-    f.open("testdata/1.jpg",std::ios::in | std::ios::binary);
+    f.open("testdata/2.jpg",std::ios::in | std::ios::binary);
     buf.push_byte(f);
-    buf.set_name("1.jpg");
+    buf.set_name("2.jpg");
 
     status_now = CLOSED;
 
