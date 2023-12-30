@@ -11,6 +11,7 @@
 #include "reliableudpconnect.h"
 #include "bytestream.h"
 #include "router/sendrouter.h"
+#include <random>
 
 int UDPSender;
 sockaddr_in addrReceiver;
@@ -26,6 +27,8 @@ extern int cnt;
 ReliableSenderUDPStatus status_now;//可靠UDP传输自动机状态
 int main(int argc, char *argv[])
 {
+    srand(time(0));
+
     pthread_mutex_init(&mutex,NULL);
     pthread_mutex_init(&send_mutex,NULL);
 

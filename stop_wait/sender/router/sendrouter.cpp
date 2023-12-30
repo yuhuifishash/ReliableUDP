@@ -5,9 +5,9 @@ extern int UDPSender;
 extern sockaddr_in addrReceiver;
 extern pthread_mutex_t send_mutex;
 
-static int LossCount = 0;
+static int LossCount = 100;
 static int now_count = 0;
-static int DelayTime = 100;//ms
+static int DelayTime = 10;//ms
 std::map<SendPacket*,int> SendQueue;
 SendPacket* p;
 void SendToReceiver()

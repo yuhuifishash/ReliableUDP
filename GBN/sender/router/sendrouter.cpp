@@ -2,14 +2,15 @@
 #include "../reliableudpsegment.h"
 #include <iostream>
 #include <algorithm>
+#include <random>
 
 extern int UDPSender;
 extern sockaddr_in addrReceiver;
 extern pthread_mutex_t send_mutex;
 
-static int LossCount = 100;
+static int LossCount = 20;
 static int now_count = 0;
-static int DelayTime = 50;//ms
+static int DelayTime = 20;//ms
 std::map<SendPacket*,int> SendQueue;
 void SendToReceiver()
 {
@@ -49,7 +50,7 @@ void* SendThread(void*)
 void SendToRouter(int __fd, ReliableUDPSegment __buf, size_t __n,int __flags, __CONST_SOCKADDR_ARG __addr,socklen_t __addr_len)
 {
     ++now_count;
-    if(now_count == LossCount){//drop this packet
+    if(now_count%LossCount == rand()%LossCount){//drop this packet
         now_count = 0;
         return;
     }
@@ -61,8 +62,12 @@ void SendToRouter(int __fd, ReliableUDPSegment __buf, size_t __n,int __flags, __
     s->__addr = __addr;
     s->__addr_len = __addr_len;
 
-    //sendto(__fd,__buf,__n,__flags,__addr,__addr_len);
-    pthread_mutex_lock(&send_mutex);
-    SendQueue[s] = DelayTime;
-    pthread_mutex_unlock(&send_mutex);
+    if(DelayTime == 0){
+        sendto(__fd,(char*)&__buf,__n,__flags,__addr,__addr_len);
+    }
+    else{
+        pthread_mutex_lock(&send_mutex);
+        SendQueue[s] = DelayTime;
+        pthread_mutex_unlock(&send_mutex);
+    }
 }

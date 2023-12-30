@@ -30,7 +30,7 @@ extern ReliableSenderUDPStatus status_now;
 extern ByteStream buf;
 extern pthread_mutex_t mutex;
 
-uint16_t Sender_windowsize = 1024*15;
+uint16_t Sender_windowsize = 1024*32;
 pthread_t send_established_t;
 
 int64_t now_ackno = -1024;  //已被确认数据号
